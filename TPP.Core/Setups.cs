@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 using NodaTime;
@@ -11,6 +13,7 @@ using TPP.Core.Commands;
 using TPP.Core.Commands.Definitions;
 using TPP.Core.Configuration;
 using TPP.Core.Overlay;
+using TPP.Core.Overlay.Events;
 using TPP.Model;
 using TPP.Persistence;
 using TPP.Persistence.MongoDB;
@@ -59,6 +62,25 @@ namespace TPP.Core
             return argsParser;
         }
 
+        public static ITransmuter SetUpTransmuter(
+            ILoggerFactory loggerFactory,
+            IImmutableSet<Common.PkmnSpecies> knownSpecies,
+            Databases databases,
+            OverlayConnection overlayConnection)
+        {
+            ITransmutationCalculator transmutationCalculator = new TransmutationCalculator(
+                badgeStatsRepo: databases.BadgeStatsRepo,
+                transmutableBadges: knownSpecies.ToImmutableSortedSet(), // TODO not everything is supposed to be transmutable
+                random: new Random().NextDouble);
+            ITransmuter transmuter = new Transmuter(databases.BadgeRepo, transmutationCalculator, databases.TokensBank);
+            transmuter.Transmuted += (_, evt) => TaskToVoidSafely(loggerFactory.CreateLogger<ITransmuter>(), async () =>
+            {
+                TransmuteEvent overlayEvent = new(evt.User.Name, evt.InputSpecies, evt.OutputSpecies, evt.Candidates);
+                await overlayConnection.Send(overlayEvent, CancellationToken.None);
+            });
+            return transmuter;
+        }
+
         public static CommandProcessor SetUpCommandProcessor(
             ILoggerFactory loggerFactory,
             ArgsParser argsParser,
@@ -66,7 +88,8 @@ namespace TPP.Core
             StopToken stopToken,
             IMessageSender messageSender,
             IChatModeChanger chatModeChanger,
-            IImmutableSet<Common.PkmnSpecies> knownSpecies)
+            IImmutableSet<Common.PkmnSpecies> knownSpecies,
+            ITransmuter transmuter)
         {
             var commandProcessor = new CommandProcessor(
                 loggerFactory.CreateLogger<CommandProcessor>(),
@@ -84,6 +107,7 @@ namespace TPP.Core
                 new PollCommands(databases.PollRepo).Commands,
                 new ManagePollCommands(databases.PollRepo).Commands,
                 new BadgeCommands(databases.BadgeRepo, databases.UserRepo, messageSender, knownSpecies).Commands,
+                new TransmuteCommands(transmuter).Commands,
                 new OperatorCommands(
                     stopToken, databases.PokeyenBank, databases.TokensBank,
                     messageSender: messageSender, databases.BadgeRepo, databases.UserRepo
@@ -107,6 +131,7 @@ namespace TPP.Core
             IUserRepo UserRepo,
             IPollRepo PollRepo,
             IBadgeRepo BadgeRepo,
+            IBadgeStatsRepo BadgeStatsRepo,
             IBank<User> PokeyenBank,
             IBank<User> TokensBank,
             ICommandLogger CommandLogger,
@@ -132,7 +157,7 @@ namespace TPP.Core
                 startingTokens: baseConfig.StartingTokens,
                 defaultOperators: baseConfig.Chat.DefaultOperatorNames);
             IMongoBadgeLogRepo badgeLogRepo = new BadgeLogRepo(mongoDatabase);
-            IBadgeRepo badgeRepo = new BadgeRepo(mongoDatabase, badgeLogRepo, clock);
+            BadgeRepo badgeRepo = new(mongoDatabase, badgeLogRepo, clock);
             badgeRepo.UserLostBadgeSpecies += (_, args) => TaskToVoidSafely(logger, () =>
                 userRepo.UnselectBadgeIfSpeciesSelected(args.UserId, args.Species));
             IBank<User> pokeyenBank = new Bank<User>(
@@ -155,6 +180,7 @@ namespace TPP.Core
             (
                 UserRepo: userRepo,
                 BadgeRepo: badgeRepo,
+                BadgeStatsRepo: badgeRepo,
                 PollRepo: new PollRepo(mongoDatabase, clock),
                 PokeyenBank: pokeyenBank,
                 TokensBank: tokenBank,

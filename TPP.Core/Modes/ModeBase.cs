@@ -69,10 +69,12 @@ namespace TPP.Core.Modes
             _commandResponders = _chats.Values.ToImmutableDictionary(
                 c => c.Name,
                 c => (ICommandResponder)new CommandResponder(c));
+            ITransmuter transmuter = Setups.SetUpTransmuter(
+                loggerFactory, pokedexData.KnownSpecies, repos, overlayConnection);
             _commandProcessors = _chats.Values.ToImmutableDictionary(
                 c => c.Name,
                 c => Setups.SetUpCommandProcessor(loggerFactory, argsParser, repos, stopToken, c, c,
-                    pokedexData.KnownSpecies));
+                    pokedexData.KnownSpecies, transmuter));
 
             _messagequeueRepo = repos.MessagequeueRepo;
             _messagelogRepo = repos.MessagelogRepo;
