@@ -103,8 +103,11 @@ namespace TPP.Core.Tests
             bankMock.Setup(b => b.PerformTransaction(Capture.In(transactionData), CancellationToken.None))
                 .ReturnsAsync(default(TransactionLog)!); // result is not used, no need to mock a response
 
+            List<TransmuteEventArgs> transmuteEventArgsList = new();
+
             ITransmuter transmuter = new Transmuter(
                 badgeRepoMock.Object, transmutationCalculatorMock.Object, bankMock.Object);
+            transmuter.Transmuted += (_, args) => transmuteEventArgsList.Add(args);
             Badge result = await transmuter.Transmute(user, 1, inputSpeciesList);
 
             Assert.That(result, Is.SameAs(outputBadge));
@@ -117,6 +120,9 @@ namespace TPP.Core.Tests
                 ["input_badges"] = inputBadges.Select(b => b.Id).ToImmutableList(),
                 ["output_badge"] = outputBadge.Id,
             }));
+            Assert.That(transmuteEventArgsList.Single().User, Is.EqualTo(user));
+            Assert.That(transmuteEventArgsList.Single().InputSpecies, Is.EqualTo(inputSpeciesList));
+            Assert.That(transmuteEventArgsList.Single().OutputSpecies, Is.EqualTo(speciesOut));
         }
 
         [Test]
