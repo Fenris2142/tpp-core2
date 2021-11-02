@@ -72,7 +72,9 @@ namespace TPP.Core
                 badgeStatsRepo: databases.BadgeStatsRepo,
                 transmutableBadges: knownSpecies.ToImmutableSortedSet(), // TODO not everything is supposed to be transmutable
                 random: new Random().NextDouble);
-            ITransmuter transmuter = new Transmuter(databases.BadgeRepo, transmutationCalculator, databases.TokensBank);
+            ITransmuter transmuter = new Transmuter(
+                databases.BadgeRepo, transmutationCalculator, databases.TokensBank, databases.TransmutationLogRepo,
+                SystemClock.Instance);
             transmuter.Transmuted += (_, evt) => TaskToVoidSafely(loggerFactory.CreateLogger<ITransmuter>(), async () =>
             {
                 TransmuteEvent overlayEvent = new(evt.User.Name, evt.InputSpecies, evt.OutputSpecies, evt.Candidates);
@@ -141,7 +143,8 @@ namespace TPP.Core
             ISubscriptionLogRepo SubscriptionLogRepo,
             IModLogRepo ModLogRepo,
             IResponseCommandRepo ResponseCommandRepo,
-            KeyValueStore KeyValueStore
+            KeyValueStore KeyValueStore,
+            ITransmutationLogRepo TransmutationLogRepo
         );
 
         public static Databases SetUpRepositories(ILogger logger, BaseConfig baseConfig)
@@ -191,7 +194,8 @@ namespace TPP.Core
                 SubscriptionLogRepo: new SubscriptionLogRepo(mongoDatabase),
                 ModLogRepo: new ModLogRepo(mongoDatabase),
                 ResponseCommandRepo: new ResponseCommandRepo(mongoDatabase),
-                KeyValueStore: new KeyValueStore(mongoDatabase)
+                KeyValueStore: new KeyValueStore(mongoDatabase),
+                TransmutationLogRepo: new TransmutationLogRepo(mongoDatabase)
             );
         }
 
